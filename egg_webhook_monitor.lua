@@ -17,6 +17,16 @@ assert(type(httpRequest) == "function", "Your executor does not support HTTP req
 
 local state = getgenv()
 local WEBHOOK_CONFIG_FILE = "egg_webhook_monitor_config.json"
+local REMOTE_SCRIPT_URL = "https://raw.githubusercontent.com/whybemqd/steal-an-egg-webhook-monitor/main/egg_webhook_monitor.lua"
+
+-- This small loader is queued for the next Roblox teleport.  It checks the
+-- saved setting again after arriving, so turning the option off before a
+-- teleport prevents an already-queued copy from starting.
+local TELEPORT_LOADER = string.format(
+    "getgenv().SAEUtilitiesTeleportQueueArmed=nil;local a,b=pcall(readfile,%q);if a then local c,d=pcall(game:GetService('HttpService').JSONDecode,game:GetService('HttpService'),b);if c and type(d)=='table' and d.autoExecuteOnTeleport==true then loadstring(game:HttpGet(%q))() end end",
+    WEBHOOK_CONFIG_FILE,
+    REMOTE_SCRIPT_URL
+)
 
 local function loadSavedConfig()
     if type(readfile) ~= "function" then
@@ -36,7 +46,7 @@ local function loadSavedConfig()
     return {}
 end
 
-local function saveConfig(webhook, uiKeyName)
+local function saveConfig(webhook, uiKeyName, monitoringEnabled, autoExecuteOnTeleport)
     if type(writefile) ~= "function" then
         return false
     end
@@ -44,6 +54,8 @@ local function saveConfig(webhook, uiKeyName)
     local encodeOK, encoded = pcall(HttpService.JSONEncode, HttpService, {
         webhook = webhook,
         uiToggleKey = uiKeyName,
+        monitoringEnabled = monitoringEnabled == true,
+        autoExecuteOnTeleport = autoExecuteOnTeleport == true,
     })
 
     if not encodeOK then
@@ -55,6 +67,17 @@ end
 
 local savedConfig = loadSavedConfig()
 local savedWebhook = state.EggWebhookLastURL or savedConfig.webhook or ""
+local savedMonitoringEnabled = type(state.SAEUtilitiesMonitoringEnabled) == "boolean"
+    and state.SAEUtilitiesMonitoringEnabled
+    or savedConfig.monitoringEnabled == true
+local savedAutoExecuteOnTeleport = type(state.SAEUtilitiesAutoExecuteOnTeleport) == "boolean"
+    and state.SAEUtilitiesAutoExecuteOnTeleport
+    or savedConfig.autoExecuteOnTeleport == true
+
+-- A previous script version queued immediately.  This version follows the
+-- executor-friendly pattern used by Infinite Yield: queue when OnTeleport
+-- fires, rather than while the player is still in the server.
+state.SAEUtilitiesTeleportQueueArmed = nil
 
 local function keyCodeFromName(name)
     local keyCode = type(name) == "string" and Enum.KeyCode[name]
@@ -128,28 +151,39 @@ local title = create("TextLabel", {
 }, panel)
 
 local webhookTab = create("TextButton", {
-    Size = UDim2.new(0.5, -14, 0, 28),
+    Size = UDim2.new(1 / 3, -9, 0, 28),
     Position = UDim2.fromOffset(10, 46),
     BackgroundColor3 = Color3.fromRGB(35, 170, 90),
     BorderSizePixel = 0,
     Text = "Webhook",
     Font = Enum.Font.GothamBold,
-    TextSize = 13,
+    TextSize = 12,
     TextColor3 = Color3.fromRGB(255, 255, 255),
 }, panel)
 
 local mutationTab = create("TextButton", {
-    Size = UDim2.new(0.5, -14, 0, 28),
-    Position = UDim2.new(0.5, 4, 0, 46),
+    Size = UDim2.new(1 / 3, -9, 0, 28),
+    Position = UDim2.new(1 / 3, 5, 0, 46),
     BackgroundColor3 = Color3.fromRGB(54, 59, 70),
     BorderSizePixel = 0,
     Text = "Mutation",
     Font = Enum.Font.GothamBold,
-    TextSize = 13,
+    TextSize = 12,
     TextColor3 = Color3.fromRGB(255, 255, 255),
 }, panel)
 
-for _, button in ipairs({ webhookTab, mutationTab }) do
+local miscTab = create("TextButton", {
+    Size = UDim2.new(1 / 3, -9, 0, 28),
+    Position = UDim2.new(2 / 3, 1, 0, 46),
+    BackgroundColor3 = Color3.fromRGB(54, 59, 70),
+    BorderSizePixel = 0,
+    Text = "Misc",
+    Font = Enum.Font.GothamBold,
+    TextSize = 12,
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+}, panel)
+
+for _, button in ipairs({ webhookTab, mutationTab, miscTab }) do
     create("UICorner", { CornerRadius = UDim.new(0, 7) }, button)
 end
 
@@ -160,6 +194,13 @@ local webhookPage = create("Frame", {
 }, panel)
 
 local mutationPage = create("Frame", {
+    Size = UDim2.new(1, -20, 1, -92),
+    Position = UDim2.fromOffset(10, 84),
+    BackgroundTransparency = 1,
+    Visible = false,
+}, panel)
+
+local miscPage = create("Frame", {
     Size = UDim2.new(1, -20, 1, -92),
     Position = UDim2.fromOffset(10, 84),
     BackgroundTransparency = 1,
@@ -339,6 +380,32 @@ local mutationStatus = create("TextLabel", {
     TextXAlignment = Enum.TextXAlignment.Left,
 }, mutationPage)
 
+local teleportAutoExecuteToggle = create("TextButton", {
+    Size = UDim2.new(1, 0, 0, 42),
+    Position = UDim2.fromOffset(0, 0),
+    BackgroundColor3 = Color3.fromRGB(105, 50, 50),
+    BorderSizePixel = 0,
+    Text = "Autoexecute on teleport: OFF",
+    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+}, miscPage)
+
+create("UICorner", { CornerRadius = UDim.new(0, 8) }, teleportAutoExecuteToggle)
+
+local miscStatus = create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 64),
+    Position = UDim2.fromOffset(0, 54),
+    BackgroundTransparency = 1,
+    Text = "When enabled, the script starts again after your next teleport. You must run it once first.",
+    Font = Enum.Font.Gotham,
+    TextSize = 12,
+    TextColor3 = Color3.fromRGB(175, 180, 190),
+    TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Top,
+}, miscPage)
+
 local minimizedStatus = create("TextLabel", {
     Size = UDim2.fromScale(1, 1),
     BackgroundTransparency = 1,
@@ -350,12 +417,13 @@ local minimizedStatus = create("TextLabel", {
 }, panel)
 
 -- State and display helpers
-local enabled = false
+local enabled = savedMonitoringEnabled
 local seenEggs = {}
 local minimized = false
 local choosingKey = false
 local activeTab = "webhook"
 local autoMutationEnabled = false
+local autoExecuteOnTeleport = savedAutoExecuteOnTeleport
 local selectedPlacedEggUid
 local expandedPanelSize = UDim2.fromOffset(274, 310)
 local minimizedPanelSize = UDim2.fromOffset(180, 42)
@@ -363,6 +431,11 @@ local minimizedPanelSize = UDim2.fromOffset(180, 42)
 local function setStatus(text, color)
     status.Text = text
     status.TextColor3 = color or Color3.fromRGB(175, 180, 190)
+end
+
+local function setMiscStatus(text, color)
+    miscStatus.Text = text
+    miscStatus.TextColor3 = color or Color3.fromRGB(175, 180, 190)
 end
 
 local function updateToggle()
@@ -391,6 +464,54 @@ local function updateMutationToggle()
         or Color3.fromRGB(105, 50, 50)
 end
 
+local function updateTeleportAutoExecuteToggle()
+    teleportAutoExecuteToggle.Text = autoExecuteOnTeleport
+        and "Autoexecute on teleport: ON"
+        or "Autoexecute on teleport: OFF"
+    teleportAutoExecuteToggle.BackgroundColor3 = autoExecuteOnTeleport
+        and Color3.fromRGB(35, 170, 90)
+        or Color3.fromRGB(105, 50, 50)
+end
+
+local function teleportQueueFunction()
+    local environment = getgenv()
+    local candidates = {
+        { "syn.queue_on_teleport", syn and syn.queue_on_teleport },
+        { "queue_on_teleport", queue_on_teleport },
+        { "queueonteleport", queueonteleport },
+        { "getgenv().queue_on_teleport", environment.queue_on_teleport },
+        { "fluxus.queue_on_teleport", fluxus and fluxus.queue_on_teleport },
+        { "krnl.queue_on_teleport", krnl and krnl.queue_on_teleport },
+    }
+
+    for _, candidate in ipairs(candidates) do
+        if type(candidate[2]) == "function" then
+            return candidate[2], candidate[1]
+        end
+    end
+end
+
+local function queueTeleportRerun()
+    if state.SAEUtilitiesTeleportQueueArmed then
+        return true, "Already armed for the next teleport."
+    end
+
+    local queue, queueName = teleportQueueFunction()
+
+    if type(queue) ~= "function" then
+        return false, "This executor does not support queue_on_teleport."
+    end
+
+    local queued, errorMessage = pcall(queue, TELEPORT_LOADER)
+
+    if not queued then
+        return false, "Could not queue the script for teleport: " .. tostring(errorMessage)
+    end
+
+    state.SAEUtilitiesTeleportQueueArmed = true
+    return true, "Armed via " .. queueName .. " for the next teleport."
+end
+
 local function setActiveTab(tabName)
     activeTab = tabName
     webhookTab.BackgroundColor3 = tabName == "webhook"
@@ -399,8 +520,12 @@ local function setActiveTab(tabName)
     mutationTab.BackgroundColor3 = tabName == "mutation"
         and Color3.fromRGB(35, 170, 90)
         or Color3.fromRGB(54, 59, 70)
+    miscTab.BackgroundColor3 = tabName == "misc"
+        and Color3.fromRGB(35, 170, 90)
+        or Color3.fromRGB(54, 59, 70)
     webhookPage.Visible = not minimized and tabName == "webhook"
     mutationPage.Visible = not minimized and tabName == "mutation"
+    miscPage.Visible = not minimized and tabName == "misc"
 
     if tabName ~= "mutation" then
         mutationDropdownList.Visible = false
@@ -413,9 +538,11 @@ local function setMinimized(value)
     title.Visible = not minimized
     webhookTab.Visible = not minimized
     mutationTab.Visible = not minimized
+    miscTab.Visible = not minimized
     minimizedStatus.Visible = minimized
     webhookPage.Visible = not minimized and activeTab == "webhook"
     mutationPage.Visible = not minimized and activeTab == "mutation"
+    miscPage.Visible = not minimized and activeTab == "misc"
 
     if not minimized and not choosingKey then
         keybindButton.Text = "UI key: " .. uiToggleKey.Name
@@ -1162,7 +1289,7 @@ table.insert(connections, webhookBox.FocusLost:Connect(function()
     webhookBox.TextTransparency = 1
     updateUrlDisplay()
     urlDisplay.Visible = true
-    if saveConfig(webhookBox.Text, uiToggleKey.Name) then
+    if saveConfig(webhookBox.Text, uiToggleKey.Name, enabled, autoExecuteOnTeleport) then
         setStatus("Webhook URL saved locally.", Color3.fromRGB(90, 220, 130))
     else
         setStatus("Webhook ready; local saving is unavailable in this executor.", Color3.fromRGB(175, 180, 190))
@@ -1190,6 +1317,10 @@ end))
 table.insert(connections, mutationTab.MouseButton1Click:Connect(function()
     setActiveTab("mutation")
     refreshSelectedEggInfo()
+end))
+
+table.insert(connections, miscTab.MouseButton1Click:Connect(function()
+    setActiveTab("misc")
 end))
 
 table.insert(connections, mutationDropdown.MouseButton1Click:Connect(function()
@@ -1256,6 +1387,27 @@ task.spawn(function()
     end
 end)
 
+-- Queue at the actual teleport boundary.  Infinite Yield's rejoin and
+-- serverhop commands both call TeleportService, which raises this event.
+table.insert(connections, player.OnTeleport:Connect(function(teleportState)
+    if teleportState == Enum.TeleportState.Failed then
+        state.SAEUtilitiesTeleportQueueArmed = nil
+        return
+    end
+
+    if not autoExecuteOnTeleport then
+        return
+    end
+
+    local queued, queueMessage = queueTeleportRerun()
+
+    if queued then
+        setMiscStatus(queueMessage, Color3.fromRGB(90, 220, 130))
+    else
+        setMiscStatus(queueMessage, Color3.fromRGB(235, 90, 90))
+    end
+end))
+
 table.insert(connections, keybindButton.MouseButton1Click:Connect(function()
     if choosingKey then
         return
@@ -1287,7 +1439,7 @@ table.insert(connections, UserInputService.InputBegan:Connect(function(input)
         keybindButton.Text = "UI key: " .. uiToggleKey.Name
         keybindHint.Text = "Click to choose the key that minimizes/restores the UI."
 
-        if saveConfig(webhookBox.Text, uiToggleKey.Name) then
+        if saveConfig(webhookBox.Text, uiToggleKey.Name, enabled, autoExecuteOnTeleport) then
             setStatus("UI key " .. uiToggleKey.Name .. " saved locally.", Color3.fromRGB(90, 220, 130))
         else
             setStatus("UI key set; local saving is unavailable in this executor.", Color3.fromRGB(175, 180, 190))
@@ -1309,9 +1461,10 @@ table.insert(connections, toggle.MouseButton1Click:Connect(function()
         return
     end
 
-    state.EggWebhookLastURL = webhook
-    saveConfig(webhook, uiToggleKey.Name)
     enabled = not enabled
+    state.EggWebhookLastURL = webhook
+    state.SAEUtilitiesMonitoringEnabled = enabled
+    saveConfig(webhook, uiToggleKey.Name, enabled, autoExecuteOnTeleport)
     updateToggle()
 
     setStatus(
@@ -1320,8 +1473,60 @@ table.insert(connections, toggle.MouseButton1Click:Connect(function()
     )
 end))
 
+table.insert(connections, teleportAutoExecuteToggle.MouseButton1Click:Connect(function()
+    if autoExecuteOnTeleport then
+        autoExecuteOnTeleport = false
+        state.SAEUtilitiesAutoExecuteOnTeleport = false
+        state.SAEUtilitiesTeleportQueueArmed = nil
+        saveConfig(webhookBox.Text, uiToggleKey.Name, enabled, false)
+        updateTeleportAutoExecuteToggle()
+        setMiscStatus("Disabled. Future teleports will not start the script.", Color3.fromRGB(175, 180, 190))
+        return
+    end
+
+    if type(writefile) ~= "function" then
+        setMiscStatus("This executor cannot save settings locally.", Color3.fromRGB(235, 90, 90))
+        return
+    end
+
+    autoExecuteOnTeleport = true
+    state.SAEUtilitiesAutoExecuteOnTeleport = true
+
+    if not saveConfig(webhookBox.Text, uiToggleKey.Name, enabled, true) then
+        autoExecuteOnTeleport = false
+        state.SAEUtilitiesAutoExecuteOnTeleport = false
+        setMiscStatus("Could not save the autoexecute setting.", Color3.fromRGB(235, 90, 90))
+        return
+    end
+
+    local _, queueName = teleportQueueFunction()
+
+    if not queueName then
+        autoExecuteOnTeleport = false
+        state.SAEUtilitiesAutoExecuteOnTeleport = false
+        saveConfig(webhookBox.Text, uiToggleKey.Name, enabled, false)
+        setMiscStatus("This executor does not support queue_on_teleport.", Color3.fromRGB(235, 90, 90))
+        return
+    end
+
+    updateTeleportAutoExecuteToggle()
+    setMiscStatus("Enabled. " .. queueName .. " will run when teleport begins.", Color3.fromRGB(90, 220, 130))
+end))
+
 updateToggle()
 updateUrlDisplay()
 updateMutationToggle()
+updateTeleportAutoExecuteToggle()
+
+if autoExecuteOnTeleport then
+    local _, queueName = teleportQueueFunction()
+
+    if queueName then
+        setMiscStatus("Enabled. " .. queueName .. " will run when teleport begins.", Color3.fromRGB(90, 220, 130))
+    else
+        setMiscStatus("This executor does not support queue_on_teleport.", Color3.fromRGB(235, 90, 90))
+    end
+end
+
 setActiveTab("webhook")
 setMinimized(false)
