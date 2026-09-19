@@ -5,12 +5,22 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local UserInputService = game:GetService("UserInputService")
 
+-- Queued executor scripts can begin before the destination place has finished
+-- replicating.  Wait here, before requiring any game-specific modules.
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
 local player = Players.LocalPlayer
 
-local Assets = require(ReplicatedStorage.Data.Assets)
-local Areas = require(ReplicatedStorage.Data.Areas)
-local AssetEarnings = require(ReplicatedStorage.Shared.Util.AssetEarnings)
-local EggRecords = require(ReplicatedStorage.Shared.Util.EggRecords)
+local data = ReplicatedStorage:WaitForChild("Data")
+local shared = ReplicatedStorage:WaitForChild("Shared")
+local util = shared:WaitForChild("Util")
+
+local Assets = require(data:WaitForChild("Assets"))
+local Areas = require(data:WaitForChild("Areas"))
+local AssetEarnings = require(util:WaitForChild("AssetEarnings"))
+local EggRecords = require(util:WaitForChild("EggRecords"))
 
 local httpRequest = (syn and syn.request) or http_request or request
 assert(type(httpRequest) == "function", "Your executor does not support HTTP requests.")
@@ -24,7 +34,7 @@ local REMOTE_SCRIPT_URL = "https://raw.githubusercontent.com/whybemqd/steal-an-e
 -- readfile before a teleport but not during their queued-script startup.
 -- The toggle is already checked before this loader is queued at OnTeleport.
 local TELEPORT_LOADER = string.format(
-    "loadstring(game:HttpGet(%q))()",
+    "if not game:IsLoaded() then game.Loaded:Wait() end;task.wait(1);loadstring(game:HttpGet(%q))()",
     REMOTE_SCRIPT_URL
 )
 
@@ -67,12 +77,14 @@ end
 
 local savedConfig = loadSavedConfig()
 local savedWebhook = state.EggWebhookLastURL or savedConfig.webhook or ""
-local savedMonitoringEnabled = type(state.SAEUtilitiesMonitoringEnabled) == "boolean"
-    and state.SAEUtilitiesMonitoringEnabled
-    or savedConfig.monitoringEnabled == true
-local savedAutoExecuteOnTeleport = type(state.SAEUtilitiesAutoExecuteOnTeleport) == "boolean"
-    and state.SAEUtilitiesAutoExecuteOnTeleport
-    or savedConfig.autoExecuteOnTeleport == true
+local savedMonitoringEnabled = type(savedConfig.monitoringEnabled) == "boolean"
+    and savedConfig.monitoringEnabled
+    or state.SAEUtilitiesMonitoringEnabled == true
+local savedAutoExecuteOnTeleport = type(savedConfig.autoExecuteOnTeleport) == "boolean"
+    and savedConfig.autoExecuteOnTeleport
+    or state.SAEUtilitiesAutoExecuteOnTeleport == true
+state.SAEUtilitiesMonitoringEnabled = savedMonitoringEnabled
+state.SAEUtilitiesAutoExecuteOnTeleport = savedAutoExecuteOnTeleport
 
 -- A previous script version queued immediately.  This version follows the
 -- executor-friendly pattern used by Infinite Yield: queue when OnTeleport
