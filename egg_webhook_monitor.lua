@@ -65,17 +65,18 @@ local uiToggleKey = keyCodeFromName(state.EggWebhookUiToggleKey or savedConfig.u
 state.EggWebhookUiToggleKey = uiToggleKey.Name
 
 -- Clear a prior copy when re-executed.
-for _, connection in ipairs(state.EggWebhookGuiConnections or {}) do
+for _, connection in ipairs(state.SAEUtilitiesConnections or state.EggWebhookGuiConnections or {}) do
     pcall(function()
         connection:Disconnect()
     end)
 end
 
-state.EggWebhookGuiConnections = {}
-local connections = state.EggWebhookGuiConnections
+state.SAEUtilitiesConnections = {}
+state.EggWebhookGuiConnections = state.SAEUtilitiesConnections -- compatibility with older copies
+local connections = state.SAEUtilitiesConnections
 
 local guiParent = (gethui and gethui()) or game:GetService("CoreGui")
-local oldGui = guiParent:FindFirstChild("EggWebhookMonitor")
+local oldGui = guiParent:FindFirstChild("SAEUtilities") or guiParent:FindFirstChild("EggWebhookMonitor")
 
 if oldGui then
     oldGui:Destroy()
@@ -94,14 +95,15 @@ end
 
 -- GUI
 local gui = create("ScreenGui", {
-    Name = "EggWebhookMonitor",
+    Name = "SAEUtilities",
     ResetOnSpawn = false,
     IgnoreGuiInset = true,
     DisplayOrder = 999999,
 }, guiParent)
 
 local panel = create("Frame", {
-    Size = UDim2.fromOffset(820, 260),
+    -- Roughly one third of the original monitor's width.
+    Size = UDim2.fromOffset(274, 310),
     Position = UDim2.fromScale(0.5, 0.5),
     AnchorPoint = Vector2.new(0.5, 0.5),
     BackgroundColor3 = Color3.fromRGB(25, 28, 34),
@@ -111,29 +113,62 @@ local panel = create("Frame", {
     Draggable = true,
 }, gui)
 
-create("UICorner", {
-    CornerRadius = UDim.new(0, 12),
-}, panel)
-
-create("UIStroke", {
-    Color = Color3.fromRGB(70, 75, 88),
-    Thickness = 1,
-}, panel)
+create("UICorner", { CornerRadius = UDim.new(0, 12) }, panel)
+create("UIStroke", { Color = Color3.fromRGB(70, 75, 88), Thickness = 1 }, panel)
 
 local title = create("TextLabel", {
     Size = UDim2.new(1, -32, 0, 30),
-    Position = UDim2.fromOffset(16, 14),
+    Position = UDim2.fromOffset(16, 12),
     BackgroundTransparency = 1,
-    Text = "Egg Collection Monitor",
+    Text = "SAE Utilities",
     Font = Enum.Font.GothamBold,
     TextSize = 19,
     TextColor3 = Color3.fromRGB(245, 245, 245),
     TextXAlignment = Enum.TextXAlignment.Left,
 }, panel)
 
+local webhookTab = create("TextButton", {
+    Size = UDim2.new(0.5, -14, 0, 28),
+    Position = UDim2.fromOffset(10, 46),
+    BackgroundColor3 = Color3.fromRGB(35, 170, 90),
+    BorderSizePixel = 0,
+    Text = "Webhook",
+    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+}, panel)
+
+local mutationTab = create("TextButton", {
+    Size = UDim2.new(0.5, -14, 0, 28),
+    Position = UDim2.new(0.5, 4, 0, 46),
+    BackgroundColor3 = Color3.fromRGB(54, 59, 70),
+    BorderSizePixel = 0,
+    Text = "Mutation",
+    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+}, panel)
+
+for _, button in ipairs({ webhookTab, mutationTab }) do
+    create("UICorner", { CornerRadius = UDim.new(0, 7) }, button)
+end
+
+local webhookPage = create("Frame", {
+    Size = UDim2.new(1, -20, 1, -92),
+    Position = UDim2.fromOffset(10, 84),
+    BackgroundTransparency = 1,
+}, panel)
+
+local mutationPage = create("Frame", {
+    Size = UDim2.new(1, -20, 1, -92),
+    Position = UDim2.fromOffset(10, 84),
+    BackgroundTransparency = 1,
+    Visible = false,
+}, panel)
+
 local webhookBox = create("TextBox", {
-    Size = UDim2.new(1, -32, 0, 42),
-    Position = UDim2.fromOffset(16, 58),
+    Size = UDim2.new(1, 0, 0, 38),
+    Position = UDim2.fromOffset(0, 0),
     BackgroundColor3 = Color3.fromRGB(40, 44, 53),
     BorderSizePixel = 0,
     ClearTextOnFocus = false,
@@ -141,71 +176,168 @@ local webhookBox = create("TextBox", {
     PlaceholderColor3 = Color3.fromRGB(150, 155, 165),
     Text = savedWebhook,
     TextColor3 = Color3.fromRGB(245, 245, 245),
+    TextTransparency = 1,
     TextSize = 11,
     Font = Enum.Font.Gotham,
     TextXAlignment = Enum.TextXAlignment.Left,
-}, panel)
+}, webhookPage)
 
-create("UICorner", {
-    CornerRadius = UDim.new(0, 8),
-}, webhookBox)
-
+create("UICorner", { CornerRadius = UDim.new(0, 8) }, webhookBox)
 create("UIPadding", {
     PaddingLeft = UDim.new(0, 12),
     PaddingRight = UDim.new(0, 12),
 }, webhookBox)
 
+-- TextBox has no ellipsis mode.  This overlay shows the saved URL with an
+-- ellipsis when it is too long, while the complete URL is shown while editing.
+local urlDisplay = create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 38),
+    Position = UDim2.fromOffset(0, 0),
+    BackgroundColor3 = Color3.fromRGB(40, 44, 53),
+    BorderSizePixel = 0,
+    Text = savedWebhook ~= "" and savedWebhook or "Discord webhook URL",
+    TextColor3 = savedWebhook ~= "" and Color3.fromRGB(245, 245, 245) or Color3.fromRGB(150, 155, 165),
+    TextSize = 11,
+    Font = Enum.Font.Gotham,
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Active = true,
+    ZIndex = 2,
+}, webhookPage)
+
+create("UICorner", { CornerRadius = UDim.new(0, 8) }, urlDisplay)
+create("UIPadding", {
+    PaddingLeft = UDim.new(0, 12),
+    PaddingRight = UDim.new(0, 12),
+}, urlDisplay)
+
 local keybindButton = create("TextButton", {
-    Size = UDim2.fromOffset(210, 32),
-    Position = UDim2.fromOffset(16, 112),
+    Size = UDim2.new(1, 0, 0, 34),
+    Position = UDim2.fromOffset(0, 50),
     BackgroundColor3 = Color3.fromRGB(54, 59, 70),
     BorderSizePixel = 0,
     Text = "UI key: " .. uiToggleKey.Name,
     Font = Enum.Font.GothamBold,
     TextSize = 13,
     TextColor3 = Color3.fromRGB(245, 245, 245),
-}, panel)
+}, webhookPage)
 
-create("UICorner", {
-    CornerRadius = UDim.new(0, 8),
-}, keybindButton)
+create("UICorner", { CornerRadius = UDim.new(0, 8) }, keybindButton)
 
 local keybindHint = create("TextLabel", {
-    Size = UDim2.new(1, -258, 0, 32),
-    Position = UDim2.fromOffset(242, 112),
+    Size = UDim2.new(1, 0, 0, 16),
+    Position = UDim2.fromOffset(0, 86),
     BackgroundTransparency = 1,
-    Text = "Click to choose the key that minimizes/restores the UI.",
+    Text = "Click to choose the minimize/restore key.",
     Font = Enum.Font.Gotham,
-    TextSize = 12,
+    TextSize = 11,
     TextColor3 = Color3.fromRGB(175, 180, 190),
     TextXAlignment = Enum.TextXAlignment.Left,
-}, panel)
+}, webhookPage)
 
 local toggle = create("TextButton", {
-    Size = UDim2.new(1, -32, 0, 44),
-    Position = UDim2.fromOffset(16, 156),
+    Size = UDim2.new(1, 0, 0, 42),
+    Position = UDim2.fromOffset(0, 110),
     BackgroundColor3 = Color3.fromRGB(105, 50, 50),
     BorderSizePixel = 0,
     Text = "Monitoring: OFF",
     Font = Enum.Font.GothamBold,
     TextSize = 16,
     TextColor3 = Color3.fromRGB(255, 255, 255),
-}, panel)
+}, webhookPage)
 
-create("UICorner", {
-    CornerRadius = UDim.new(0, 8),
-}, toggle)
+create("UICorner", { CornerRadius = UDim.new(0, 8) }, toggle)
 
 local status = create("TextLabel", {
-    Size = UDim2.new(1, -32, 0, 24),
-    Position = UDim2.fromOffset(16, 213),
+    Size = UDim2.new(1, 0, 0, 44),
+    Position = UDim2.fromOffset(0, 160),
     BackgroundTransparency = 1,
     Text = "Paste a webhook URL, then enable monitoring.",
     Font = Enum.Font.Gotham,
     TextSize = 12,
     TextColor3 = Color3.fromRGB(175, 180, 190),
     TextXAlignment = Enum.TextXAlignment.Left,
-}, panel)
+    TextWrapped = true,
+}, webhookPage)
+
+local mutationDropdown = create("TextButton", {
+    Size = UDim2.new(1, 0, 0, 38),
+    Position = UDim2.fromOffset(0, 0),
+    BackgroundColor3 = Color3.fromRGB(40, 44, 53),
+    BorderSizePixel = 0,
+    Text = "Select a placed egg...",
+    TextTruncate = Enum.TextTruncate.AtEnd,
+    Font = Enum.Font.Gotham,
+    TextSize = 12,
+    TextColor3 = Color3.fromRGB(245, 245, 245),
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, mutationPage)
+
+create("UICorner", { CornerRadius = UDim.new(0, 8) }, mutationDropdown)
+create("UIPadding", {
+    PaddingLeft = UDim.new(0, 12),
+    PaddingRight = UDim.new(0, 12),
+}, mutationDropdown)
+
+local mutationDropdownList = create("ScrollingFrame", {
+    Size = UDim2.new(1, 0, 0, 118),
+    Position = UDim2.fromOffset(0, 42),
+    BackgroundColor3 = Color3.fromRGB(35, 39, 47),
+    BorderSizePixel = 0,
+    CanvasSize = UDim2.fromOffset(0, 0),
+    ScrollBarThickness = 5,
+    Visible = false,
+    ZIndex = 10,
+}, mutationPage)
+
+create("UICorner", { CornerRadius = UDim.new(0, 8) }, mutationDropdownList)
+
+local mutationInfo = create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 72),
+    Position = UDim2.fromOffset(0, 48),
+    BackgroundColor3 = Color3.fromRGB(40, 44, 53),
+    BorderSizePixel = 0,
+    Text = "Pet: —\nWeight: —\nMutation: —\nMoney/s: —",
+    Font = Enum.Font.Gotham,
+    TextSize = 12,
+    TextColor3 = Color3.fromRGB(220, 225, 232),
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Top,
+    TextWrapped = true,
+}, mutationPage)
+
+create("UICorner", { CornerRadius = UDim.new(0, 8) }, mutationInfo)
+create("UIPadding", {
+    PaddingTop = UDim.new(0, 7),
+    PaddingBottom = UDim.new(0, 7),
+    PaddingLeft = UDim.new(0, 10),
+    PaddingRight = UDim.new(0, 10),
+}, mutationInfo)
+
+local mutationToggle = create("TextButton", {
+    Size = UDim2.new(1, 0, 0, 42),
+    Position = UDim2.fromOffset(0, 132),
+    BackgroundColor3 = Color3.fromRGB(105, 50, 50),
+    BorderSizePixel = 0,
+    Text = "Auto Mutation: OFF",
+    Font = Enum.Font.GothamBold,
+    TextSize = 15,
+    TextColor3 = Color3.fromRGB(255, 255, 255),
+}, mutationPage)
+
+create("UICorner", { CornerRadius = UDim.new(0, 8) }, mutationToggle)
+
+local mutationStatus = create("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 30),
+    Position = UDim2.fromOffset(0, 180),
+    BackgroundTransparency = 1,
+    Text = "Choose a placed egg to begin.",
+    Font = Enum.Font.Gotham,
+    TextSize = 11,
+    TextColor3 = Color3.fromRGB(175, 180, 190),
+    TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Left,
+}, mutationPage)
 
 local minimizedStatus = create("TextLabel", {
     Size = UDim2.fromScale(1, 1),
@@ -222,7 +354,10 @@ local enabled = false
 local seenEggs = {}
 local minimized = false
 local choosingKey = false
-local expandedPanelSize = UDim2.fromOffset(820, 260)
+local activeTab = "webhook"
+local autoMutationEnabled = false
+local selectedPlacedEggUid
+local expandedPanelSize = UDim2.fromOffset(274, 310)
 local minimizedPanelSize = UDim2.fromOffset(180, 42)
 
 local function setStatus(text, color)
@@ -241,16 +376,46 @@ local function updateToggle()
         or Color3.fromRGB(235, 120, 120)
 end
 
+local function updateUrlDisplay()
+    local value = webhookBox.Text
+    urlDisplay.Text = value ~= "" and value or "Discord webhook URL"
+    urlDisplay.TextColor3 = value ~= ""
+        and Color3.fromRGB(245, 245, 245)
+        or Color3.fromRGB(150, 155, 165)
+end
+
+local function updateMutationToggle()
+    mutationToggle.Text = autoMutationEnabled and "Auto Mutation: ON" or "Auto Mutation: OFF"
+    mutationToggle.BackgroundColor3 = autoMutationEnabled
+        and Color3.fromRGB(35, 170, 90)
+        or Color3.fromRGB(105, 50, 50)
+end
+
+local function setActiveTab(tabName)
+    activeTab = tabName
+    webhookTab.BackgroundColor3 = tabName == "webhook"
+        and Color3.fromRGB(35, 170, 90)
+        or Color3.fromRGB(54, 59, 70)
+    mutationTab.BackgroundColor3 = tabName == "mutation"
+        and Color3.fromRGB(35, 170, 90)
+        or Color3.fromRGB(54, 59, 70)
+    webhookPage.Visible = not minimized and tabName == "webhook"
+    mutationPage.Visible = not minimized and tabName == "mutation"
+
+    if tabName ~= "mutation" then
+        mutationDropdownList.Visible = false
+    end
+end
+
 local function setMinimized(value)
     minimized = value
     panel.Size = minimized and minimizedPanelSize or expandedPanelSize
     title.Visible = not minimized
-    webhookBox.Visible = not minimized
-    keybindButton.Visible = not minimized
-    keybindHint.Visible = not minimized
-    toggle.Visible = not minimized
-    status.Visible = not minimized
+    webhookTab.Visible = not minimized
+    mutationTab.Visible = not minimized
     minimizedStatus.Visible = minimized
+    webhookPage.Visible = not minimized and activeTab == "webhook"
+    mutationPage.Visible = not minimized and activeTab == "mutation"
 
     if not minimized and not choosingKey then
         keybindButton.Text = "UI key: " .. uiToggleKey.Name
@@ -276,27 +441,93 @@ local function mutationList(value)
     return result
 end
 
+-- "Boss" is the internal game flag for the Fractured mutation.  Use the
+-- player-facing name everywhere, including the stop check for Auto Mutation.
+local mutationNameOverrides = {
+    boss = "Fractured",
+}
+
+local function displayMutationName(value)
+    local name = tostring(value or ""):match("^%s*(.-)%s*$")
+    return mutationNameOverrides[name:lower()] or name
+end
+
 local function mutationText(value)
+    if type(value) == "table" then
+        local names = {}
+        local seen = {}
+
+        local function add(name)
+            name = displayMutationName(name)
+            if name ~= "" and not seen[name] then
+                seen[name] = true
+                table.insert(names, name)
+            end
+        end
+
+        for key, entry in pairs(value) do
+            if type(key) == "string" then
+                add(key)
+            end
+            if type(entry) == "string" then
+                add(entry)
+            end
+        end
+
+        table.sort(names)
+        return #names > 0 and table.concat(names, ", ") or "None"
+    end
+
     local text = tostring(value or ""):match("^%s*(.-)%s*$")
     return text ~= "" and text or "None"
 end
 
-local function formatRate(value)
-    local suffixes = {
-        { 1e15, "Qa" },
-        { 1e12, "T" },
-        { 1e9, "B" },
-        { 1e6, "M" },
-        { 1e3, "K" },
-    }
+local function hasMutation(value, target)
+    local wanted = tostring(target):lower()
 
-    for _, entry in ipairs(suffixes) do
-        if value >= entry[1] then
-            return string.format("%.2f%s/s", value / entry[1], entry[2])
+    if type(value) == "table" then
+        for key, entry in pairs(value) do
+            if displayMutationName(key):lower() == wanted
+                or displayMutationName(entry):lower() == wanted then
+                return true
+            end
         end
+        return false
     end
 
-    return string.format("%.2f/s", value)
+    return mutationText(value):lower():find(wanted, 1, true) ~= nil
+end
+
+-- Keep every displayed value easy to read without adding decimal noise.
+local function formatNumber(value, decimals)
+    value = tonumber(value)
+    if not value then
+        return "Unknown"
+    end
+
+    decimals = decimals == nil and 0 or decimals
+    local sign = value < 0 and "-" or ""
+    local absolute = string.format("%." .. decimals .. "f", math.abs(value))
+    local whole, fraction = absolute:match("^(%d+)%.?(%d*)$")
+    whole = whole:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+
+    return sign .. whole .. (decimals > 0 and "." .. fraction or "")
+end
+
+local function formatRate(value)
+    value = tonumber(value)
+    if not value then
+        return "Unavailable"
+    end
+
+    -- Keep earnings deliberately simple: just M and B, as shown by the game.
+    if math.abs(value) >= 1e9 then
+        return formatNumber(value / 1e9) .. "B/s"
+    elseif math.abs(value) >= 1e6 then
+        return formatNumber(value / 1e6) .. "M/s"
+    end
+
+    return formatNumber(value) .. "/s"
 end
 
 local imageCache = {}
@@ -518,7 +749,7 @@ local function eggInventory(newEggUid)
             count += 1
         end
 
-        return string.format("%d egg%s", count, count == 1 and "" or "s")
+        return string.format("%s egg%s", formatNumber(count, 0), count == 1 and "" or "s")
     end
 
     -- Conservative fallback if the Egg UI has not loaded yet: only count eggs,
@@ -534,7 +765,203 @@ local function eggInventory(newEggUid)
         end
     end
 
-    return string.format("%d egg%s", count, count == 1 and "" or "s")
+    return string.format("%s egg%s", formatNumber(count, 0), count == 1 and "" or "s")
+end
+
+-- Mutation tab: use the same live EggInventory data as the webhook monitor,
+-- but include only eggs that have a Placement record.
+local function placedEggRecords()
+    local inventory = currentEggInventory()
+    local records = {}
+
+    if not inventory then
+        return records
+    end
+
+    for uid, egg in pairs(inventory) do
+        if type(egg) == "table" and egg.Placement ~= nil then
+            local asset = Assets.Directory[egg.AssetCategory]
+            if asset then
+                local earningsOK, earnings = pcall(AssetEarnings.RatePerSecond, {
+                    Category = egg.AssetCategory,
+                    Scale = egg.AssetScale or egg.Scale or 1,
+                    Mutations = mutationList(egg.Mutations),
+                })
+
+                table.insert(records, {
+                    uid = uid,
+                    data = egg,
+                    asset = asset,
+                    petName = asset.DisplayName or egg.AssetCategory,
+                    weight = backpackWeight(egg, asset),
+                    mutations = mutationText(egg.Mutations),
+                    rate = earningsOK and earnings or nil,
+                })
+            end
+        end
+    end
+
+    table.sort(records, function(a, b)
+        if a.petName == b.petName then
+            return a.uid < b.uid
+        end
+        return a.petName < b.petName
+    end)
+
+    return records
+end
+
+local function getSelectedPlacedEgg()
+    if not selectedPlacedEggUid then
+        return nil
+    end
+
+    for _, record in ipairs(placedEggRecords()) do
+        if record.uid == selectedPlacedEggUid then
+            return record
+        end
+    end
+
+    return nil
+end
+
+local function setMutationStatus(text, color)
+    mutationStatus.Text = text
+    mutationStatus.TextColor3 = color or Color3.fromRGB(175, 180, 190)
+end
+
+local function refreshSelectedEggInfo()
+    local record = getSelectedPlacedEgg()
+
+    if not record then
+        selectedPlacedEggUid = nil
+        mutationDropdown.Text = "Select a placed egg..."
+        mutationInfo.Text = "Pet: —\nWeight: —\nMutation: —\nMoney/s: —"
+        return nil
+    end
+
+    mutationDropdown.Text = record.petName
+    mutationInfo.Text = string.format(
+        "Pet: %s\nWeight: %s\nMutation: %s\nMoney/s: %s",
+        record.petName,
+        record.weight and formatNumber(record.weight) .. " kg" or "Unknown",
+        record.mutations,
+        record.rate and formatRate(record.rate) or "Unavailable"
+    )
+
+    return record
+end
+
+local function rebuildMutationDropdown()
+    for _, child in ipairs(mutationDropdownList:GetChildren()) do
+        if child:IsA("GuiObject") then
+            child:Destroy()
+        end
+    end
+
+    local records = placedEggRecords()
+
+    if #records == 0 then
+        local empty = create("TextLabel", {
+            Size = UDim2.new(1, -10, 0, 32),
+            Position = UDim2.fromOffset(5, 4),
+            BackgroundTransparency = 1,
+            Text = "No placed eggs found.",
+            Font = Enum.Font.Gotham,
+            TextSize = 12,
+            TextColor3 = Color3.fromRGB(175, 180, 190),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 11,
+        }, mutationDropdownList)
+        mutationDropdownList.CanvasSize = UDim2.fromOffset(0, 40)
+        return
+    end
+
+    for index, record in ipairs(records) do
+        local button = create("TextButton", {
+            Size = UDim2.new(1, -10, 0, 34),
+            Position = UDim2.fromOffset(5, 4 + (index - 1) * 36),
+            BackgroundColor3 = Color3.fromRGB(48, 53, 64),
+            BorderSizePixel = 0,
+            Text = string.format(
+                "%s | %s | %s | %s",
+                record.petName,
+                record.weight and formatNumber(record.weight) .. " kg" or "Unknown",
+                record.mutations,
+                record.rate and formatRate(record.rate) or "Unavailable"
+            ),
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Font = Enum.Font.Gotham,
+            TextSize = 11,
+            TextColor3 = Color3.fromRGB(235, 238, 242),
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 11,
+        }, mutationDropdownList)
+
+        create("UICorner", { CornerRadius = UDim.new(0, 6) }, button)
+        create("UIPadding", {
+            PaddingLeft = UDim.new(0, 8),
+            PaddingRight = UDim.new(0, 8),
+        }, button)
+
+        table.insert(connections, button.MouseButton1Click:Connect(function()
+            selectedPlacedEggUid = record.uid
+            mutationDropdownList.Visible = false
+            refreshSelectedEggInfo()
+            setMutationStatus("Selected " .. record.petName .. ".", Color3.fromRGB(90, 220, 130))
+        end))
+    end
+
+    mutationDropdownList.CanvasSize = UDim2.fromOffset(0, #records * 36 + 8)
+end
+
+local function mutationConsumableUses()
+    local uses = 0
+
+    for _, container in ipairs({ player:FindFirstChildOfClass("Backpack"), player.Character }) do
+        if container then
+            for _, item in ipairs(container:GetChildren()) do
+                if item:IsA("Tool") and item:GetAttribute("ItemType") == "MutationConsumable" then
+                    uses += tonumber(item:GetAttribute("Uses")) or 1
+                end
+            end
+        end
+    end
+
+    return uses
+end
+
+local function applyMutation(record)
+    if hasMutation(record.data.Mutations, "Fractured") then
+        return false, "The selected egg is already Fractured."
+    end
+
+    if mutationConsumableUses() <= 0 then
+        return false, "No Mutation Consumables are available."
+    end
+
+    local networking = ReplicatedStorage.Packages:FindFirstChild("Networking")
+    local remote = networking and networking:FindFirstChild("RF/BossMastery/AskUseMutationConsumable")
+
+    if not remote or not remote:IsA("RemoteFunction") then
+        return false, "The game's mutation action is unavailable."
+    end
+
+    -- The client exposes this server action for the selected egg UUID.  Keep
+    -- each request serialized and re-check live data before trying again.
+    local ok, response = pcall(function()
+        return remote:InvokeServer(record.uid)
+    end)
+
+    if not ok then
+        return false, "Mutation request failed."
+    end
+
+    if response == false then
+        return false, "The game rejected the mutation request."
+    end
+
+    return true
 end
 
 local function postJson(url, payload)
@@ -649,7 +1076,7 @@ local function notify(tool)
                 },
                 {
                     name = "Backpack weight",
-                    value = eggWeight and string.format("%.2f kg", eggWeight) or "Unknown",
+                    value = eggWeight and formatNumber(eggWeight) .. " kg" or "Unknown",
                     inline = true,
                 },
                 {
@@ -732,12 +1159,102 @@ table.insert(connections, player.CharacterAdded:Connect(watch))
 
 table.insert(connections, webhookBox.FocusLost:Connect(function()
     state.EggWebhookLastURL = webhookBox.Text
+    webhookBox.TextTransparency = 1
+    updateUrlDisplay()
+    urlDisplay.Visible = true
     if saveConfig(webhookBox.Text, uiToggleKey.Name) then
         setStatus("Webhook URL saved locally.", Color3.fromRGB(90, 220, 130))
     else
         setStatus("Webhook ready; local saving is unavailable in this executor.", Color3.fromRGB(175, 180, 190))
     end
 end))
+
+table.insert(connections, webhookBox.Focused:Connect(function()
+    urlDisplay.Visible = false
+    webhookBox.TextTransparency = 0
+end))
+
+table.insert(connections, urlDisplay.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        urlDisplay.Visible = false
+        webhookBox.TextTransparency = 0
+        webhookBox:CaptureFocus()
+    end
+end))
+
+table.insert(connections, webhookTab.MouseButton1Click:Connect(function()
+    setActiveTab("webhook")
+end))
+
+table.insert(connections, mutationTab.MouseButton1Click:Connect(function()
+    setActiveTab("mutation")
+    refreshSelectedEggInfo()
+end))
+
+table.insert(connections, mutationDropdown.MouseButton1Click:Connect(function()
+    if mutationDropdownList.Visible then
+        mutationDropdownList.Visible = false
+        return
+    end
+
+    rebuildMutationDropdown()
+    mutationDropdownList.Visible = true
+end))
+
+table.insert(connections, mutationToggle.MouseButton1Click:Connect(function()
+    local record = refreshSelectedEggInfo()
+
+    if not autoMutationEnabled and not record then
+        setMutationStatus("Select a placed egg first.", Color3.fromRGB(235, 90, 90))
+        return
+    end
+
+    if not autoMutationEnabled and hasMutation(record.data.Mutations, "Fractured") then
+        setMutationStatus("That egg is already Fractured.", Color3.fromRGB(240, 185, 75))
+        return
+    end
+
+    autoMutationEnabled = not autoMutationEnabled
+    updateMutationToggle()
+    setMutationStatus(
+        autoMutationEnabled and "Auto Mutation is applying consumables." or "Auto Mutation paused.",
+        autoMutationEnabled and Color3.fromRGB(90, 220, 130) or Color3.fromRGB(175, 180, 190)
+    )
+end))
+
+task.spawn(function()
+    while gui.Parent do
+        task.wait(0.8)
+
+        if autoMutationEnabled then
+            local record = refreshSelectedEggInfo()
+
+            if not record then
+                autoMutationEnabled = false
+                updateMutationToggle()
+                setMutationStatus("The selected egg is no longer placed.", Color3.fromRGB(240, 185, 75))
+            elseif hasMutation(record.data.Mutations, "Fractured") then
+                autoMutationEnabled = false
+                updateMutationToggle()
+                setMutationStatus("Stopped: the selected egg is Fractured.", Color3.fromRGB(90, 220, 130))
+            else
+                local applied, message = applyMutation(record)
+
+                if applied then
+                    setMutationStatus(
+                        string.format("Applying Mutation Consumable (%d use%s left).", mutationConsumableUses(), mutationConsumableUses() == 1 and "" or "s"),
+                        Color3.fromRGB(90, 220, 130)
+                    )
+                else
+                    autoMutationEnabled = false
+                    updateMutationToggle()
+                    setMutationStatus(message or "Mutation stopped.", Color3.fromRGB(235, 90, 90))
+                end
+            end
+        end
+    end
+end)
 
 table.insert(connections, keybindButton.MouseButton1Click:Connect(function()
     if choosingKey then
@@ -804,4 +1321,7 @@ table.insert(connections, toggle.MouseButton1Click:Connect(function()
 end))
 
 updateToggle()
+updateUrlDisplay()
+updateMutationToggle()
+setActiveTab("webhook")
 setMinimized(false)
