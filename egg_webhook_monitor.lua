@@ -19,12 +19,12 @@ local state = getgenv()
 local WEBHOOK_CONFIG_FILE = "egg_webhook_monitor_config.json"
 local REMOTE_SCRIPT_URL = "https://raw.githubusercontent.com/whybemqd/steal-an-egg-webhook-monitor/main/egg_webhook_monitor.lua"
 
--- This small loader is queued for the next Roblox teleport.  It checks the
--- saved setting again after arriving, so turning the option off before a
--- teleport prevents an already-queued copy from starting.
+-- Queue the same direct loader that Infinite Yield uses.  The previous
+-- bootstrap re-read the config file after teleporting; some executors expose
+-- readfile before a teleport but not during their queued-script startup.
+-- The toggle is already checked before this loader is queued at OnTeleport.
 local TELEPORT_LOADER = string.format(
-    "getgenv().SAEUtilitiesTeleportQueueArmed=nil;local a,b=pcall(readfile,%q);if a then local c,d=pcall(game:GetService('HttpService').JSONDecode,game:GetService('HttpService'),b);if c and type(d)=='table' and d.autoExecuteOnTeleport==true then loadstring(game:HttpGet(%q))() end end",
-    WEBHOOK_CONFIG_FILE,
+    "loadstring(game:HttpGet(%q))()",
     REMOTE_SCRIPT_URL
 )
 
